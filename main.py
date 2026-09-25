@@ -1,13 +1,11 @@
 import asyncio
-import os
 import random
 from datetime import datetime, timedelta
-from io import BytesIO
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, LabeledPrice
+from aiogram.types import BufferedInputFile, CallbackQuery
 
 from config import (
     BOT_TOKEN, ADMIN_ID, CHANNEL_ID, CHANNEL_URL,
@@ -34,7 +32,7 @@ from states import (
 from texts import (
     GREET, ASK_AGE, ASK_HEIGHT, ASK_WEIGHT, ASK_MEALS, ASK_MEALS_HELP,
     ASK_WATER, ASK_WATER_HELP, ASK_GOAL, BODY_PHRASES,
-    SUBSCRIBE_ASK, SUBSCRIBE_FAIL, HELP, FOOD_LESSONS, TITLES, MANIPULATIONS
+    SUBSCRIBE_ASK, SUBSCRIBE_FAIL, HELP, FOOD_LESSONS, TITLES
 )
 from charts import (
     draw_circle, draw_week_chart, draw_profile_progress,
@@ -42,6 +40,7 @@ from charts import (
 )
 from payments import send_pro_invoice, send_lifetime_invoice, send_program_invoice
 from scheduler import start_scheduler
+import os
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -79,6 +78,29 @@ def norm_kcal(weight, goal):
     if goal and "похудеть" in goal.lower():
         return int(weight * 26)
     return int(weight * 30)
+
+
+def safe_image(path):
+    """Возвращает BufferedInputFile или None, если файла нет."""
+    try:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return BufferedInputFile(f.read(), filename=os.path.basename(path))
+    except Exception:
+        pass
+    return None
+
+
+async def send_photo_or_text(message, img_path, caption, reply_markup=None):
+    """Шлёт фото если есть, иначе текст."""
+    photo = safe_image(img_path)
+    if photo:
+        try:
+            await message.answer_photo(photo, caption=caption, reply_markup=reply_markup)
+            return
+        except Exception:
+            pass
+    await message.answer(caption, reply_markup=reply_markup)
 
 
 # ─────────── START ───────────
@@ -189,7 +211,7 @@ async def reg_water(message: types.Message, state: FSMContext):
         f"Вес: {data['weight']} кг\n"
         f"Приёмов пищи: {data['meals']}\n"
         f"Вода: {data['water']} л\n"
-        f"Цель: {data.get('goal', '—')}"
+        f"Цель: {data.get('goal', '-')}"
     )
     await message.answer(SUBSCRIBE_ASK, reply_markup=kb_subscribe())
     await state.set_state(Reg.subscribe)
@@ -228,8 +250,11 @@ async def water_tracker(message: types.Message, state: FSMContext):
     buf = draw_circle(percent, "Вода", f"{today:.1f} / {norm} л", color="#2196F3")
     await message.answer_photo(
         BufferedInputFile(buf.read(), filename="water.png"),
-        caption=f"💧 <b>Водный баланс</b>\nСегодня: <b>{percent}%</b>\n\n"
-                f"Сколько выпил? Напиши в литрах (например 0.5)"
+        caption=(
+            f"💧 <b>Водный баланс</b>\n"
+            f"Сегодня: <b>{percent}%</b>\n\n"
+            f"Сколько выпил? Напиши в литрах (например 0.5)"
+        )
     )
     await state.set_state(TrackerState.water)
 
@@ -257,8 +282,11 @@ async def food_tracker(message: types.Message, state: FSMContext):
     buf = draw_circle(percent, "Еда", f"{today} / {norm} ккал", color="#4CAF50")
     await message.answer_photo(
         BufferedInputFile(buf.read(), filename="food.png"),
-        caption=f"🍎 <b>Питание</b>\nСегодня: <b>{percent}%</b>\n\n"
-                f"Сколько съел? Напиши в ккал (примерно, например 500)"
+        caption=(
+            f"🍎 <b>Питание</b>\n"
+            f"Сегодня: <b>{percent}%</b>\n\n"
+            f"Сколько съел? Напиши в ккал (примерно, например 500)"
+        )
     )
     await state.set_state(TrackerState.food)
 
@@ -302,7 +330,7 @@ async def profile(message: types.Message):
     days = (datetime.now() - created).days + 1
     values = [min(100, (i + 1) * 5) for i in range(min(days, 10))]
     buf = draw_profile_progress(values, days, user.get("streak") or 0)
-    title = user.get("current_title") or "—"
+    title = user.get("current_title") or "-"
     await message.answer_photo(
         BufferedInputFile(buf.read(), filename="profile.png"),
         caption=(
@@ -311,11 +339,11 @@ async def profile(message: types.Message):
             f"📅 В Билли: {days} дней\n"
             f"🔥 Серия: <b>{user.get('streak') or 0}</b>\n"
             f"🏅 Титул дня: <b>{title}</b>\n"
-            f"⚖️ Вес: {user.get('weight') or '—'} кг\n"
-            f"📏 Рост: {user.get('height') or '—'} см\n"
-            f"🎯 Цель: {user.get('goal') or '—'}\n"
-            f"🍗 Приёмов пищи: {user.get('meals') or '—'}\n"
-            f"💧 Вода: {user.get('water_l') or '—'} л\n"
+            f"⚖️ Вес: {user.get('weight') or '-'} кг\n"
+            f"📏 Рост: {user.get('height') or '-'} см\n"
+            f"🎯 Цель: {user.get('goal') or '-'}\n"
+            f"🍗 Приёмов пищи: {user.get('meals') or '-'}\n"
+            f"💧 Вода: {user.get('water_l') or '-'} л\n"
             f"━━━━━━━━━━━━━━━"
         )
     )
@@ -378,10 +406,10 @@ async def send_lesson(message, idx):
         )
         return
     lesson = FOOD_LESSONS[idx]
-    with open("images/food_lesson.png", "rb") as f:
-        photo = BufferedInputFile(f.read(), filename="food.png")
-    await message.answer_photo(
-        photo, caption=lesson["text"],
+    await send_photo_or_text(
+        message,
+        "images/food_lesson.png",
+        lesson["text"],
         reply_markup=kb_food_lessons(idx, len(FOOD_LESSONS), has_pro)
     )
 
@@ -396,7 +424,10 @@ async def food_nav(cb: CallbackQuery):
     if idx < 0 or idx >= len(FOOD_LESSONS):
         await cb.answer("Край, бро")
         return
-    await cb.message.delete()
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
     await send_lesson(cb.message, idx)
     await cb.answer()
 
@@ -439,11 +470,14 @@ async def nofap_set(message: types.Message, state: FSMContext):
         advice = "Норма, бро. Не парься. Но следи."
     else:
         advice = "Слушай, займись делом. Стресс, сон, тренировки — вот твоё."
+    caption = (
+        f"📊 <b>Статистика</b>\n\n{advice}\n\n"
+        f"<i>Тестостерон падает ненадолго после, но восстанавливается. "
+        f"Главное - не в петлю зависимости. Держи баланс.</i>"
+    )
     await message.answer_photo(
         BufferedInputFile(buf.read(), filename="nofap.png"),
-        caption=f"📊 <b>Статистика</b>\n\n{advice}\n\n"
-                f"<i>Тестостерон падает ненадолго после, но восстанавливается. "
-                f>Главное — не в петлю зависимости. Держи баланс.</i>"
+        caption=caption
     )
     await state.clear()
 
@@ -553,6 +587,83 @@ async def shame_cmd(message: types.Message):
 
 
 # ─────────── ТРЕНИРОВКА ───────────
+def get_plan_for_user(user):
+    goal = (user.get("goal") or "").lower()
+    place = user.get("workout_place") or "home"
+    inv = user.get("inventory") or "nothing"
+
+    if place == "gym":
+        if "похудеть" in goal:
+            return [
+                ("Приседания", "4x10", "ex_squat"),
+                ("Жим лёжа", "4x8", "ex_bench"),
+                ("Тяга штанги", "4x8", "ex_deadlift"),
+                ("Бёрпи", "3x12", "ex_burpee"),
+                ("Скакалка", "3x60сек", "ex_jumprope"),
+                ("Планка", "3x60сек", "ex_plank"),
+            ]
+        elif "сила" in goal or "сильн" in goal:
+            return [
+                ("Приседания", "5x5", "ex_squat"),
+                ("Жим лёжа", "5x5", "ex_bench"),
+                ("Становая тяга", "1x5", "ex_deadlift"),
+                ("Жим стоя", "5x5", "ex_press"),
+                ("Тяга штанги", "5x5", "ex_row"),
+            ]
+        else:
+            return [
+                ("Жим лёжа", "4x8", "ex_bench"),
+                ("Жим гантелей", "3x10", "ex_press"),
+                ("Разводка гантелей", "3x12", "ex_fly"),
+                ("Брусья", "3x10", "ex_dips"),
+                ("Французский жим", "3x12", "ex_curl"),
+            ]
+    else:
+        if "похудеть" in goal:
+            return [
+                ("Бег/быстрая ходьба", "15 мин", "ex_run"),
+                ("Бёрпи", "3x12", "ex_burpee"),
+                ("Скакалка", "3x60сек", "ex_jumprope"),
+                ("Приседания", "4x20", "ex_squat"),
+                ("Выпады", "3x12", "ex_lunge"),
+                ("Планка", "3x60сек", "ex_plank"),
+            ]
+        elif inv == "dumbbells":
+            return [
+                ("Жим гантелей лёжа", "4x10", "ex_bench"),
+                ("Тяга гантелей", "4x10", "ex_row"),
+                ("Приседания с гантелями", "4x12", "ex_squat"),
+                ("Выпады с гантелями", "3x12", "ex_lunge"),
+                ("Махи в стороны", "3x15", "ex_press"),
+                ("Французский жим", "3x12", "ex_curl"),
+            ]
+        elif inv == "kettlebell":
+            return [
+                ("Приседания с гирей", "4x12", "ex_squat"),
+                ("Мах гирей", "4x15", "ex_row"),
+                ("Жим гири", "3x10", "ex_press"),
+                ("Выпады с гирей", "3x12", "ex_lunge"),
+                ("Планка", "3x60сек", "ex_plank"),
+            ]
+        elif inv in ("backpack_water", "backpack_books"):
+            return [
+                ("Приседания с рюкзаком", "4x15", "ex_squat"),
+                ("Жим рюкзака", "4x12", "ex_press"),
+                ("Тяга рюкзака", "4x12", "ex_row"),
+                ("Выпады с рюкзаком", "3x12", "ex_lunge"),
+                ("Планка с рюкзаком", "3x60сек", "ex_plank"),
+            ]
+        else:
+            return [
+                ("Отжимания", "4x15", "ex_pushup"),
+                ("Приседания", "4x20", "ex_squat"),
+                ("Выпады", "3x12", "ex_lunge"),
+                ("Планка", "3x60сек", "ex_plank"),
+                ("Бёрпи", "3x10", "ex_burpee"),
+                ("Скакалка (или бег на месте)", "3x60сек", "ex_jumprope"),
+            ]
+
+
 @dp.message(F.text == "🏋️ Тренировка")
 async def workout_menu(message: types.Message, state: FSMContext):
     user = await get_user(message.from_user.id)
@@ -606,8 +717,8 @@ async def workout_home(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "🏟 В зале")
 async def workout_gym(message: types.Message, state: FSMContext):
-    await start_workout_plan(message, "gym")
-    await state.set_state(WorkoutState.running)
+    await update_user(message.from_user.id, workout_place="gym")
+    await show_workout_plan(message)
 
 
 @dp.message(WorkoutState.inventory)
@@ -616,54 +727,32 @@ async def inventory_set(message: types.Message, state: FSMContext):
         await message.answer("Где тренируешься?", reply_markup=kb_workout_place())
         await state.clear()
         return
-    await start_workout_plan(message, "home", message.text)
-    await state.set_state(WorkoutState.running)
-
-
-async def start_workout_plan(message, place, inventory=None):
-    user = await get_user(message.from_user.id)
-    goal = (user.get("goal") or "").lower()
-
-    plan = {
-        "gym": [
-            ("Жим лёжа", "4x8", "ex_bench"),
-            ("Приседания", "4x8", "ex_squat"),
-            ("Тяга штанги", "4x8", "ex_deadlift"),
-            ("Подтягивания", "3x10", "ex_pullup"),
-            ("Жим гантелей", "3x10", "ex_press"),
-            ("Планка", "3x60сек", "ex_plank"),
-        ],
-        "home": [
-            ("Отжимания", "4x15", "ex_pushup"),
-            ("Приседания", "4x20", "ex_squat"),
-            ("Выпады", "3x12", "ex_lunge"),
-            ("Планка", "3x60сек", "ex_plank"),
-            ("Бёрпи", "3x10", "ex_burpee"),
-            ("Скакалка", "3x60сек", "ex_jumprope"),
-        ],
+    inv_map = {
+        "🏋️ Гантели": "dumbbells",
+        "🔔 Гиря": "kettlebell",
+        "🎒 Рюкзак с водой": "backpack_water",
+        "📚 Рюкзак с книгами": "backpack_books",
+        "🚫 Ничего нет": "nothing",
     }
-    if "похудеть" in goal:
-        plan["home"].insert(0, ("Бег", "10 мин", "ex_run"))
+    inv = inv_map.get(message.text, "nothing")
+    await update_user(message.from_user.id, workout_place="home", inventory=inv)
+    await show_workout_plan(message)
 
-    context_plan = plan.get(place, plan["home"])
 
+async def show_workout_plan(message):
+    user = await get_user(message.from_user.id)
+    plan = get_plan_for_user(user)
     text = "🦍 <b>Твоя тренировка, бро:</b>\n\n"
-    for i, (name, sets, _) in enumerate(context_plan, 1):
+    for i, (name, sets, _) in enumerate(plan, 1):
         text += f"{i}. <b>{name}</b> — {sets}\n"
     text += f"\n🎧 <b>Плейлист:</b> {CHANNEL_URL}\n\nГотов?"
-
     await message.answer(text, reply_markup=kb_start_workout())
 
 
 @dp.callback_query(F.data == "start_workout")
 async def start_workout(cb: CallbackQuery, state: FSMContext):
     user = await get_user(cb.from_user.id)
-    plan = [
-        ("Жим лёжа", "4x8", "ex_bench"),
-        ("Приседания", "4x8", "ex_squat"),
-        ("Тяга штанги", "4x8", "ex_deadlift"),
-        ("Подтягивания", "3x10", "ex_pullup"),
-    ]
+    plan = get_plan_for_user(user)
     await state.update_data(plan=plan, idx=0, done=0)
     await send_next_exercise(cb.message, state)
     await cb.answer()
@@ -683,12 +772,12 @@ async def send_next_exercise(message, state):
         f"Давай, бро. Ты можешь. 💪\n"
         f"Когда закончишь — жми кнопку."
     )
-    try:
-        with open(f"images/exercises/{img}.png", "rb") as f:
-            photo = BufferedInputFile(f.read(), filename="ex.png")
-        await message.answer_photo(photo, caption=text, reply_markup=kb_exercise_done())
-    except Exception:
-        await message.answer(text, reply_markup=kb_exercise_done())
+    await send_photo_or_text(
+        message,
+        f"images/exercises/{img}.png",
+        text,
+        reply_markup=kb_exercise_done()
+    )
 
 
 @dp.callback_query(F.data == "ex_done")
@@ -697,7 +786,10 @@ async def ex_done(cb: CallbackQuery, state: FSMContext):
     idx = data.get("idx", 0) + 1
     done = data.get("done", 0) + 1
     await state.update_data(idx=idx, done=done)
-    await cb.message.delete()
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
     await send_next_exercise(cb.message, state)
     await cb.answer("Красавчик!")
 
@@ -707,7 +799,10 @@ async def ex_fail(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     idx = data.get("idx", 0) + 1
     await state.update_data(idx=idx)
-    await cb.message.delete()
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
     await send_next_exercise(cb.message, state)
     await cb.answer("Ок, идём дальше")
 
