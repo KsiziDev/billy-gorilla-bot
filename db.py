@@ -31,7 +31,9 @@ async def init_db():
             current_title TEXT,
             current_title_date TEXT,
             goal_text TEXT,
-            subscribed INTEGER DEFAULT 0
+            subscribed INTEGER DEFAULT 0,
+            workout_place TEXT,
+            inventory TEXT
         );
 
         CREATE TABLE IF NOT EXISTS tracker (
